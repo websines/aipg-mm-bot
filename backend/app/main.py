@@ -102,92 +102,48 @@ async def update_balance():
         await asyncio.sleep(300)  # 5 minutes in seconds
 
 async def update_grid_orders():
-    """Background task to update grid orders every 30 minutes"""
+    """Background task to update grid orders every 5 minutes"""
     db = next(get_db())
     while True:
         try:
             grid_state = get_active_grid(db)
             if grid_state:
-                logger.info("Updating grid orders...")
+                logger.info("Checking grid status...")
                 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 logger.info(f"Current time: {current_time}")
                 
                 # Check if price needs correction
                 needs_adjustment, target_price = await exchange.should_adjust_grid(grid_state.symbol)
                 
-                # Get current market price (use target price if adjustment needed)
-                current_price = target_price if needs_adjustment else await exchange.get_market_price(grid_state.symbol)
-                logger.info(f"Using price: {current_price} ({'target' if needs_adjustment else 'market'} price)")
-                
                 if needs_adjustment:
-                    logger.info(f"Price correction needed. Adjusting grid to target price: {target_price}")
+                    logger.info(f"Price correction needed. Current orders will be adjusted.")
+                    
+                    # Cancel existing orders
+                    await exchange.cancel_all_orders(grid_state.symbol)
+                    logger.info("Cancelled existing orders")
+                    
+                    # Create new grid with target price
+                    await exchange.create_grid(
+                        symbol=grid_state.symbol,
+                        positions=grid_state.positions,
+                        total_amount=grid_state.total_amount,
+                        min_distance=grid_state.min_distance,
+                        max_distance=grid_state.max_distance,
+                        center_price=target_price
+                    )
+                    logger.info(f"Created new grid around target price: {target_price}")
                 
-                # Get balance and open orders
-                balance = await exchange.get_balance("usdt")
+                # Update grid status in database
                 open_orders = await exchange.get_open_orders(grid_state.symbol)
+                balance = await exchange.get_balance("usdt")
+                current_price = await exchange.get_market_price(grid_state.symbol)
+                save_grid_state(db, grid_state, current_price, open_orders, balance)
                 
-                # Update state in database
-                save_grid_state(db, GridParams(
-                    symbol=grid_state.symbol,
-                    positions=grid_state.positions,
-                    total_amount=grid_state.total_amount,
-                    min_distance=grid_state.min_distance,
-                    max_distance=grid_state.max_distance
-                ), current_price, open_orders, balance)
-                
-                # Cancel existing orders
-                await exchange.cancel_all_orders(grid_state.symbol)
-                logger.info("Cancelled existing orders")
-                
-                # Calculate grid parameters
-                amount_per_grid = grid_state.total_amount / grid_state.positions
-                price_step = (grid_state.max_distance - grid_state.min_distance) / (grid_state.positions - 1)
-                
-                # Place new grid orders around current price
-                for i in range(grid_state.positions):
-                    try:
-                        distance = grid_state.min_distance + (price_step * i)
-                        
-                        # Calculate buy and sell prices based on current market price
-                        buy_price = current_price * (1 - distance / 100)
-                        sell_price = current_price * (1 + distance / 100)
-                        
-                        # Place buy order
-                        await exchange.place_grid_orders(
-                            symbol=grid_state.symbol,
-                            price=buy_price,
-                            quantity=amount_per_grid / buy_price,
-                            side='BUY'
-                        )
-                        
-                        # Place sell order
-                        await exchange.place_grid_orders(
-                            symbol=grid_state.symbol,
-                            price=sell_price,
-                            quantity=amount_per_grid / sell_price,
-                            side='SELL'
-                        )
-                        
-                    except Exception as e:
-                        logger.error(f"Error placing grid orders at level {i}: {str(e)}")
-                
-                logger.info("Successfully updated grid orders")
-                
-                # Update final state
-                final_orders = await exchange.get_open_orders(grid_state.symbol)
-                save_grid_state(db, GridParams(
-                    symbol=grid_state.symbol,
-                    positions=grid_state.positions,
-                    total_amount=grid_state.total_amount,
-                    min_distance=grid_state.min_distance,
-                    max_distance=grid_state.max_distance
-                ), current_price, final_orders, balance)
-            
+            # Sleep for 5 minutes
+            await asyncio.sleep(300)
         except Exception as e:
             logger.error(f"Error in grid update task: {str(e)}")
-        
-        # Check more frequently when price correction is needed
-        await asyncio.sleep(300)  # 5 minutes in seconds
+            await asyncio.sleep(60)  # Wait a minute before retrying
 
 @app.post("/api/grid/create")
 async def create_grid(grid_params: GridParams, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
