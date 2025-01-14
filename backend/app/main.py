@@ -112,9 +112,15 @@ async def update_grid_orders():
                 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 logger.info(f"Current time: {current_time}")
                 
-                # Get current market price
-                current_price = await exchange.get_market_price(grid_state.symbol)
-                logger.info(f"Current price: {current_price}")
+                # Check if price needs correction
+                needs_adjustment, target_price = await exchange.should_adjust_grid(grid_state.symbol)
+                
+                # Get current market price (use target price if adjustment needed)
+                current_price = target_price if needs_adjustment else await exchange.get_market_price(grid_state.symbol)
+                logger.info(f"Using price: {current_price} ({'target' if needs_adjustment else 'market'} price)")
+                
+                if needs_adjustment:
+                    logger.info(f"Price correction needed. Adjusting grid to target price: {target_price}")
                 
                 # Get balance and open orders
                 balance = await exchange.get_balance("usdt")
@@ -180,8 +186,8 @@ async def update_grid_orders():
         except Exception as e:
             logger.error(f"Error in grid update task: {str(e)}")
         
-        # Wait for 10 minutes before next update
-        await asyncio.sleep(10 * 60)  #  10 minutes in seconds
+        # Check more frequently when price correction is needed
+        await asyncio.sleep(300)  # 5 minutes in seconds
 
 @app.post("/api/grid/create")
 async def create_grid(grid_params: GridParams, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
@@ -193,8 +199,32 @@ async def create_grid(grid_params: GridParams, background_tasks: BackgroundTasks
         # Cancel any existing orders
         await exchange.cancel_all_orders(grid_params.symbol)
         
-        # Get current market price and state
-        current_price = await exchange.get_market_price(grid_params.symbol)
+        # First check if we need price correction
+        should_adjust, target_price = await exchange.should_adjust_grid(threshold=0.01)  # Lower threshold to 1%
+        
+        if should_adjust and target_price:
+            logger.info(f"Price correction needed. Using target price: {target_price}")
+            # Create grid with target price as center
+            orders = await exchange.create_grid(
+                symbol=grid_params.symbol,
+                positions=grid_params.positions,
+                total_amount=grid_params.total_amount,
+                min_distance=grid_params.min_distance,
+                max_distance=grid_params.max_distance,
+                center_price=target_price
+            )
+            current_price = target_price
+        else:
+            # Use normal market price if no correction needed
+            current_price = await exchange.get_market_price(grid_params.symbol)
+            orders = await exchange.create_grid(
+                symbol=grid_params.symbol,
+                positions=grid_params.positions,
+                total_amount=grid_params.total_amount,
+                min_distance=grid_params.min_distance,
+                max_distance=grid_params.max_distance
+            )
+        
         balance = await exchange.get_balance("usdt")
         open_orders = await exchange.get_open_orders(grid_params.symbol)
         
@@ -554,4 +584,42 @@ async def cancel_grid(symbol: str = "aipg_usdt"):
         return {"status": "success"}
     except Exception as e:
         logger.error(f"Error canceling grid: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/prices/all")
+async def get_all_prices(symbol: str = "aipg_usdt"):
+    """Get prices from all exchanges"""
+    try:
+        # Get XT price
+        xt_price = await exchange.get_market_price(symbol)
+        
+        # Get other exchange prices
+        other_prices = await exchange.get_other_exchange_prices(symbol)
+        
+        # Extract Xeggex bid/ask if available
+        xeggex_bid = None
+        xeggex_ask = None
+        if other_prices and 'xeggex_data' in other_prices:
+            xeggex_data = other_prices['xeggex_data']
+            if 'bestBid' in xeggex_data:
+                try:
+                    xeggex_bid = float(xeggex_data['bestBid'])
+                except (ValueError, TypeError):
+                    pass
+            if 'bestAsk' in xeggex_data:
+                try:
+                    xeggex_ask = float(xeggex_data['bestAsk'])
+                except (ValueError, TypeError):
+                    pass
+        
+        return {
+            "xt": xt_price,
+            "xeggex": other_prices.get('xeggex') if other_prices else None,
+            "coinex": other_prices.get('coinex') if other_prices else None,
+            "xeggex_bid": xeggex_bid,
+            "xeggex_ask": xeggex_ask,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error getting all prices: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

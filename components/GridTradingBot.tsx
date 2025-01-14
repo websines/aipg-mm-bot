@@ -62,6 +62,15 @@ interface GridStatusResponse {
   grid_status: GridStatus;
 }
 
+interface ExchangePrices {
+  xt: number | null;
+  xeggex: number | null;
+  coinex: number | null;
+  xeggex_bid?: number | null;
+  xeggex_ask?: number | null;
+  timestamp: string;
+}
+
 export default function GridTradingBot() {
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
   
@@ -83,11 +92,16 @@ export default function GridTradingBot() {
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'price', direction: 'desc' });
   const [filterSide] = useState<'ALL' | 'BUY' | 'SELL'>('ALL');
   const [filterStatus] = useState<string>('ALL');
+  const [exchangePrices, setExchangePrices] = useState<ExchangePrices | null>(null);
 
   useEffect(() => {
     void fetchInitialData();
     const statusInterval = setInterval(() => void fetchGridStatus(), 30 * 1000);
-    return () => clearInterval(statusInterval);
+    const pricesInterval = setInterval(() => void fetchAllPrices(), 30 * 1000);
+    return () => {
+      clearInterval(statusInterval);
+      clearInterval(pricesInterval);
+    };
   }, []);
 
   const fetchInitialData = async () => {
@@ -228,6 +242,19 @@ export default function GridTradingBot() {
     }));
   };
 
+  const fetchAllPrices = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/prices/all`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch prices');
+      }
+      const data = await response.json();
+      setExchangePrices(data);
+    } catch (error) {
+      console.error('Error fetching prices:', error);
+    }
+  };
+
   const totalPages = Math.ceil((openOrders?.length || 0) / itemsPerPage);
   const paginatedOrders = openOrders 
     ? sortAndFilterOrders(openOrders).slice(
@@ -241,426 +268,329 @@ export default function GridTradingBot() {
   }, [filterSide, filterStatus]);
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
-      <div className="max-w-7xl mx-auto p-4 sm:p-6">
+    <div className="min-h-screen bg-gray-900 text-white p-6">
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* Header with Price Cards */}
         <div className="flex flex-col space-y-4">
-          <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold">Grid Trading Bot</h1>
-            <div className="flex items-center space-x-4">
-              {isRunning ? (
-                <>
-                  <div className="flex items-center">
-                    <div className="w-3 h-3 bg-green-500 rounded-full mr-2 animate-pulse"></div>
-                    <span className="text-green-500">Running</span>
+          <div className="flex justify-between items-center">
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
+              AIPG Grid Trading Bot
+            </h1>
+            <div className="text-sm text-gray-400">
+              Last Update: {exchangePrices?.timestamp ? new Date(exchangePrices.timestamp).toLocaleString() : 'Never'}
+            </div>
+          </div>
+
+          {/* Compact Price Cards */}
+          <div className="grid grid-cols-3 gap-4 bg-gray-800 p-4 rounded-xl">
+            {/* XT Card */}
+            <div className="flex items-center justify-between bg-blue-600/10 rounded-lg p-3">
+              <div>
+                <div className="text-sm font-medium text-blue-400">XT.com</div>
+                <div className="text-lg font-bold">
+                  {exchangePrices?.xt 
+                    ? `$${exchangePrices.xt.toFixed(6)}` 
+                    : <div className="animate-pulse bg-blue-700/50 h-6 w-24 rounded"></div>
+                  }
+                </div>
+              </div>
+              <div className="bg-blue-500/20 px-2 py-1 rounded text-xs text-blue-300">
+                Primary
+              </div>
+            </div>
+
+            {/* Xeggex Card */}
+            <div className="flex items-center justify-between bg-purple-600/10 rounded-lg p-3">
+              <div>
+                <div className="text-sm font-medium text-purple-400">Xeggex</div>
+                <div className="text-lg font-bold">
+                  {exchangePrices?.xeggex 
+                    ? `$${exchangePrices.xeggex.toFixed(6)}` 
+                    : <div className="animate-pulse bg-purple-700/50 h-6 w-24 rounded"></div>
+                  }
+                </div>
+                {(exchangePrices?.xeggex_bid || exchangePrices?.xeggex_ask) && (
+                  <div className="text-xs text-purple-300 mt-1">
+                    ${exchangePrices.xeggex_bid?.toFixed(6)} / ${exchangePrices.xeggex_ask?.toFixed(6)}
                   </div>
-                  <button
-                    onClick={stopGrid}
-                    disabled={operationInProgress !== ''}
-                    className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
-                  >
-                    {operationInProgress === 'stop' ? (
-                      <>
-                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                        <span>Stopping...</span>
-                      </>
-                    ) : (
-                      <>
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
-                        </svg>
-                        <span>Stop Bot</span>
-                      </>
-                    )}
-                  </button>
-                </>
-              ) : (
-                <div className="flex items-center">
-                  <div className="w-3 h-3 bg-gray-500 rounded-full mr-2"></div>
-                  <span className="text-gray-500">Inactive</span>
+                )}
+              </div>
+              {exchangePrices?.xeggex && exchangePrices?.xt && (
+                <div className={`px-2 py-1 rounded text-xs ${
+                  exchangePrices.xeggex > exchangePrices.xt
+                    ? 'bg-red-500/20 text-red-300'
+                    : 'bg-green-500/20 text-green-300'
+                }`}>
+                  {((exchangePrices.xeggex - exchangePrices.xt) / exchangePrices.xt * 100).toFixed(2)}%
+                </div>
+              )}
+            </div>
+
+            {/* Coinex Card */}
+            <div className="flex items-center justify-between bg-indigo-600/10 rounded-lg p-3">
+              <div>
+                <div className="text-sm font-medium text-indigo-400">Coinex</div>
+                <div className="text-lg font-bold">
+                  {exchangePrices?.coinex 
+                    ? `$${exchangePrices.coinex.toFixed(6)}` 
+                    : <div className="animate-pulse bg-indigo-700/50 h-6 w-24 rounded"></div>
+                  }
+                </div>
+              </div>
+              {exchangePrices?.coinex && exchangePrices?.xt && (
+                <div className={`px-2 py-1 rounded text-xs ${
+                  exchangePrices.coinex > exchangePrices.xt
+                    ? 'bg-red-500/20 text-red-300'
+                    : 'bg-green-500/20 text-green-300'
+                }`}>
+                  {((exchangePrices.coinex - exchangePrices.xt) / exchangePrices.xt * 100).toFixed(2)}%
                 </div>
               )}
             </div>
           </div>
+        </div>
 
-          {error && (
-            <div className="mb-6 bg-red-500/20 border border-red-500/50 text-red-400 px-4 py-3 rounded-lg flex items-center gap-3">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-              </svg>
-              <div>
-                <p className="font-medium">Error</p>
-                <p className="text-sm">{error}</p>
-              </div>
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-1 space-y-6">
-              <div className="bg-gray-800 rounded-xl p-6 shadow-lg">
-                <h2 className="text-xl font-semibold mb-4">Grid Parameters</h2>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-1">Number of Grid Positions</label>
-                    <div className="relative">
-                      <input
-                        type="number"
-                        value={gridParams.positions}
-                        onChange={(e) => setGridParams({...gridParams, positions: Number(e.target.value)})}
-                        className="w-full p-2.5 rounded-lg bg-gray-700/50 border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
-                        min="2"
-                        max="50"
-                      />
-                      <div className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">positions</div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-1">Total Investment</label>
-                    <div className="relative">
-                      <input
-                        type="number"
-                        value={gridParams.total_amount}
-                        onChange={(e) => setGridParams({...gridParams, total_amount: Number(e.target.value)})}
-                        className="w-full p-2.5 rounded-lg bg-gray-700/50 border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
-                        min="10"
-                      />
-                      <div className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">USDT</div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-1">Grid Range</label>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="relative">
-                        <input
-                          type="number"
-                          value={gridParams.min_distance}
-                          onChange={(e) => setGridParams({...gridParams, min_distance: Number(e.target.value)})}
-                          className="w-full p-2.5 rounded-lg bg-gray-700/50 border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
-                          min="0.1"
-                          step="0.1"
-                        />
-                        <div className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">%</div>
-                      </div>
-                      <div className="relative">
-                        <input
-                          type="number"
-                          value={gridParams.max_distance}
-                          onChange={(e) => setGridParams({...gridParams, max_distance: Number(e.target.value)})}
-                          className="w-full p-2.5 rounded-lg bg-gray-700/50 border border-gray-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
-                          min="0.1"
-                          step="0.1"
-                        />
-                        <div className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">%</div>
-                      </div>
-                    </div>
-                    <div className="mt-1 flex justify-between text-xs text-gray-400">
-                      <span>Min Distance</span>
-                      <span>Max Distance</span>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={createGrid}
-                    disabled={isRunning || operationInProgress !== ''}
-                    className="w-full mt-4 px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
-                  >
-                    {operationInProgress === 'create' ? (
-                      <>
-                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                        Creating Grid...
-                      </>
-                    ) : (
-                      <>
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
-                        </svg>
-                        Start Grid Bot
-                      </>
-                    )}
-                  </button>
-                </div>
+        {/* Main Grid Bot Interface */}
+        <div className="grid grid-cols-12 gap-6">
+          {/* Left Panel - Grid Controls */}
+          <div className="col-span-4 space-y-4">
+            {/* Grid Parameters */}
+            <div className="bg-gray-800 rounded-xl p-4">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-lg font-bold">Grid Parameters</h2>
+                <button
+                  onClick={() => void createGrid()}
+                  disabled={operationInProgress === 'create'}
+                  className={`px-3 py-1.5 rounded font-medium text-sm transition-all ${
+                    operationInProgress === 'create'
+                      ? 'bg-green-600/50 cursor-not-allowed'
+                      : 'bg-green-600 hover:bg-green-700'
+                  }`}
+                >
+                  {operationInProgress === 'create' ? 'Creating...' : 'Create Grid'}
+                </button>
               </div>
 
-              {balances && (
-                <div className="bg-gray-800 rounded-xl p-6 shadow-lg">
-                  <h2 className="text-xl font-semibold mb-4">Wallet Balance</h2>
-                  <div className="space-y-4">
-                    <div className="bg-gray-700/30 rounded-lg p-4">
-                      <div className="text-sm text-gray-400">Available Balance</div>
-                      <div className="text-2xl font-semibold mt-1">{parseFloat(balances.availableAmount).toFixed(2)} <span className="text-sm text-gray-400">USDT</span></div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="bg-gray-700/30 rounded-lg p-4">
-                        <div className="text-sm text-gray-400">Frozen</div>
-                        <div className="text-lg font-medium mt-1">{parseFloat(balances.frozenAmount).toFixed(2)} <span className="text-sm text-gray-400">USDT</span></div>
-                      </div>
-                      <div className="bg-gray-700/30 rounded-lg p-4">
-                        <div className="text-sm text-gray-400">Total</div>
-                        <div className="text-lg font-medium mt-1">{parseFloat(balances.totalAmount).toFixed(2)} <span className="text-sm text-gray-400">USDT</span></div>
-                      </div>
-                    </div>
-                  </div>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <label className="text-sm font-medium text-gray-400">
+                    Grid Lines
+                  </label>
+                  <input
+                    type="number"
+                    value={gridParams.positions}
+                    onChange={(e) => setGridParams({ ...gridParams, positions: parseInt(e.target.value) })}
+                    className="w-24 bg-gray-700 border border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                  />
                 </div>
-              )}
-            </div>
-
-            <div className="lg:col-span-2 space-y-6">
-              {gridStatus && (
-                <>
-                  {/* Grid Information Cards */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
-                    {/* Market Information */}
-                    <div className="bg-gray-700/30 rounded-lg p-4">
-                      <div className="text-sm text-gray-400 mb-2">Market Information</div>
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-gray-400">Symbol:</span>
-                          <span className="font-medium">{gridStatus.symbol}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-gray-400">Current Price:</span>
-                          <span className="font-medium">{gridStatus.current_price?.toFixed(6)} USDT</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-gray-400">Available Balance:</span>
-                          <span className="font-medium">
-                            {gridStatus.balance?.availableAmount 
-                              ? parseFloat(gridStatus.balance.availableAmount).toFixed(2)
-                              : '0.00'} USDT
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Grid Configuration */}
-                    <div className="bg-gray-700/30 rounded-lg p-4">
-                      <div className="text-sm text-gray-400 mb-2">Grid Configuration</div>
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-gray-400">Upper Price:</span>
-                          <span className="font-medium">{gridStatus.upper_price?.toFixed(6)} USDT</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-gray-400">Lower Price:</span>
-                          <span className="font-medium">{gridStatus.lower_price?.toFixed(6)} USDT</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-gray-400">Grid Spread:</span>
-                          <span className="font-medium">{gridStatus.grid_spread?.toFixed(2)}%</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-gray-400">Grid Distance:</span>
-                          <span className="font-medium">{gridStatus.avg_distance?.toFixed(2)}%</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-gray-400">Grid Lines:</span>
-                          <span className="font-medium">{gridStatus.positions}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-gray-400">Investment:</span>
-                          <span className="font-medium">{gridStatus.total_amount?.toFixed(2)} USDT</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Performance Metrics */}
-                    <div className="bg-gray-700/30 rounded-lg p-4">
-                      <div className="text-sm text-gray-400 mb-2">Performance</div>
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-gray-400">Total Trades:</span>
-                          <span className="font-medium">{gridStatus.stats?.total_trades || 0}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-gray-400">Total Volume:</span>
-                          <span className="font-medium">
-                            {gridStatus.stats?.total_volume?.toFixed(2) || '0.00'} USDT
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-gray-400">Total Fees:</span>
-                          <span className="font-medium text-yellow-400">
-                            {gridStatus.stats?.total_fees?.toFixed(2) || '0.00'} USDT
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-gray-400">Realized PnL:</span>
-                          <span className={`font-medium ${
-                            (gridStatus.stats?.realized_pnl || 0) >= 0 
-                              ? 'text-green-400' 
-                              : 'text-red-400'
-                          }`}>
-                            {gridStatus.stats?.realized_pnl?.toFixed(2) || '0.00'} USDT
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-gray-400">ROI:</span>
-                          <span className={`font-medium ${
-                            (gridStatus.stats?.realized_pnl || 0) >= 0 
-                              ? 'text-green-400' 
-                              : 'text-red-400'
-                          }`}>
-                            {((gridStatus.stats?.realized_pnl || 0) / (gridStatus.total_amount || 1) * 100).toFixed(2)}%
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </>
-              )}
-
-              <div className="bg-gray-800 rounded-xl p-4 sm:p-6 shadow-lg">
-                <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-xl font-semibold">Open Orders</h2>
-                  <div className="flex items-center space-x-2">
-                    <span className="text-sm text-gray-400">
-                      Running Time: {gridStatus && gridStatus.created_at ? formatRunningTime(new Date(gridStatus.created_at)) : 'N/A'}
+                <div className="flex items-center justify-between gap-4">
+                  <label className="text-sm font-medium text-gray-400">
+                    Investment
+                  </label>
+                  <div className="relative w-24">
+                    <input
+                      type="number"
+                      value={gridParams.total_amount}
+                      onChange={(e) => setGridParams({ ...gridParams, total_amount: parseFloat(e.target.value) })}
+                      className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                    />
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">
+                      USDT
                     </span>
                   </div>
                 </div>
-                {!openOrders || openOrders.length === 0 ? (
-                  <div className="text-center py-12 text-gray-400">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto mb-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                    </svg>
-                    <p className="text-lg">No active orders</p>
-                    <p className="text-sm mt-1">Orders will appear here when the grid bot is running</p>
+                <div className="flex items-center justify-between gap-4">
+                  <label className="text-sm font-medium text-gray-400">
+                    Min Distance
+                  </label>
+                  <div className="relative w-24">
+                    <input
+                      type="number"
+                      value={gridParams.min_distance}
+                      onChange={(e) => setGridParams({ ...gridParams, min_distance: parseFloat(e.target.value) })}
+                      className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                    />
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">
+                      %
+                    </span>
                   </div>
-                ) : (
-                  <>
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <thead>
-                          <tr className="text-left text-sm text-gray-400 border-b border-gray-700">
-                            <th className="pb-3 font-medium">
-                              <button
-                                onClick={() => handleSort('side')}
-                                className="flex items-center gap-1 hover:text-white"
-                              >
-                                Side
-                                {sortConfig.key === 'side' && (
-                                  <span className="text-blue-400">
-                                    {sortConfig.direction === 'asc' ? '↑' : '↓'}
-                                  </span>
-                                )}
-                              </button>
-                            </th>
-                            <th className="pb-3 font-medium">
-                              <button
-                                onClick={() => handleSort('price')}
-                                className="flex items-center gap-1 hover:text-white"
-                              >
-                                Price (USDT)
-                                {sortConfig.key === 'price' && (
-                                  <span className="text-blue-400">
-                                    {sortConfig.direction === 'asc' ? '↑' : '↓'}
-                                  </span>
-                                )}
-                              </button>
-                            </th>
-                            <th className="pb-3 font-medium hidden sm:table-cell">
-                              <button
-                                onClick={() => handleSort('origQty')}
-                                className="flex items-center gap-1 hover:text-white"
-                              >
-                                Amount
-                                {sortConfig.key === 'origQty' && (
-                                  <span className="text-blue-400">
-                                    {sortConfig.direction === 'asc' ? '↑' : '↓'}
-                                  </span>
-                                )}
-                              </button>
-                            </th>
-                            <th className="pb-3 font-medium">
-                              <button
-                                onClick={() => handleSort('executedQty')}
-                                className="flex items-center gap-1 hover:text-white"
-                              >
-                                Filled
-                                {sortConfig.key === 'executedQty' && (
-                                  <span className="text-blue-400">
-                                    {sortConfig.direction === 'asc' ? '↑' : '↓'}
-                                  </span>
-                                )}
-                              </button>
-                            </th>
-                            <th className="pb-3 font-medium hidden lg:table-cell">
-                              <button
-                                onClick={() => handleSort('state')}
-                                className="flex items-center gap-1 hover:text-white"
-                              >
-                                Status
-                                {sortConfig.key === 'state' && (
-                                  <span className="text-blue-400">
-                                    {sortConfig.direction === 'asc' ? '↑' : '↓'}
-                                  </span>
-                                )}
-                              </button>
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-700">
-                          {paginatedOrders.map((order) => (
-                            <tr key={order.orderId} className="text-sm">
-                              <td className="py-3">
-                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                  order.side === 'BUY' 
-                                    ? 'bg-green-500/20 text-green-400' 
-                                    : 'bg-red-500/20 text-red-400'
-                                }`}>
-                                  {order.side}
-                                </span>
-                              </td>
-                              <td className="py-3">{parseFloat(order.price).toFixed(6)}</td>
-                              <td className="py-3 hidden sm:table-cell">{parseFloat(order.origQty).toFixed(2)}</td>
-                              <td className="py-3">
-                                <div className="flex items-center gap-2">
-                                  <div className="w-16 bg-gray-700 rounded-full h-1.5">
-                                    <div 
-                                      className="bg-blue-500 h-1.5 rounded-full" 
-                                      style={{width: `${(parseFloat(order.executedQty) / parseFloat(order.origQty)) * 100}%`}}
-                                    ></div>
-                                  </div>
-                                  <span>{parseFloat(order.executedQty).toFixed(2)}</span>
-                                </div>
-                              </td>
-                              <td className="py-3 hidden lg:table-cell">
-                                <span className="px-2 py-1 bg-gray-700/50 rounded-full text-xs">
-                                  {order.state}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <label className="text-sm font-medium text-gray-400">
+                    Max Distance
+                  </label>
+                  <div className="relative w-24">
+                    <input
+                      type="number"
+                      value={gridParams.max_distance}
+                      onChange={(e) => setGridParams({ ...gridParams, max_distance: parseFloat(e.target.value) })}
+                      className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                    />
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">
+                      %
+                    </span>
+                  </div>
+                </div>
+              </div>
 
-                    {totalPages > 1 && (
-                      <div className="mt-4 flex items-center justify-between border-t border-gray-700 pt-4">
-                        <button
-                          onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                          disabled={currentPage === 1}
-                          className="px-3 py-1 bg-gray-700/50 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-700"
-                        >
-                          Previous
-                        </button>
-                        <div className="text-sm text-gray-400">
-                          Page {currentPage} of {totalPages}
-                        </div>
-                        <button
-                          onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                          disabled={currentPage === totalPages}
-                          className="px-3 py-1 bg-gray-700/50 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-700"
-                        >
-                          Next
-                        </button>
+              {error && (
+                <div className="mt-4 bg-red-900/50 border border-red-500/50 text-red-200 px-3 py-2 rounded text-sm">
+                  {error}
+                </div>
+              )}
+            </div>
+
+            {/* Wallet Balance */}
+            {balances && (
+              <div className="bg-gray-800 rounded-xl p-4">
+                <h2 className="text-lg font-bold mb-3">Wallet Balance</h2>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-gray-700/30 rounded-lg p-3">
+                    <div className="text-sm text-gray-400">Available</div>
+                    <div className="text-lg font-bold mt-1">{balances.availableAmount}</div>
+                  </div>
+                  <div className="bg-gray-700/30 rounded-lg p-3">
+                    <div className="text-sm text-gray-400">Frozen</div>
+                    <div className="text-lg font-bold mt-1">{balances.frozenAmount}</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Grid Status */}
+            {gridStatus && (
+              <div className="bg-gray-800 rounded-xl p-4">
+                <div className="flex justify-between items-center mb-3">
+                  <h2 className="text-lg font-bold">Grid Status</h2>
+                  <button
+                    onClick={() => void stopGrid()}
+                    disabled={operationInProgress === 'stop'}
+                    className={`px-3 py-1.5 rounded font-medium text-sm transition-all ${
+                      operationInProgress === 'stop'
+                        ? 'bg-red-600/50 cursor-not-allowed'
+                        : 'bg-red-600 hover:bg-red-700'
+                    }`}
+                  >
+                    {operationInProgress === 'stop' ? 'Stopping...' : 'Stop Grid'}
+                  </button>
+                </div>
+                
+                <div className="space-y-3">
+                  <div className="bg-gray-700/30 rounded-lg p-3">
+                    <div className="text-sm text-gray-400">Running Time</div>
+                    <div className="text-lg font-bold mt-1">
+                      {formatRunningTime(new Date(gridStatus.created_at))}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-gray-700/30 rounded-lg p-3">
+                      <div className="text-sm text-gray-400">Trades</div>
+                      <div className="text-lg font-bold mt-1">
+                        {gridStatus.stats?.total_trades || 0}
                       </div>
-                    )}
-                  </>
+                    </div>
+                    <div className="bg-gray-700/30 rounded-lg p-3">
+                      <div className="text-sm text-gray-400">PnL</div>
+                      <div className={`text-lg font-bold mt-1 ${
+                        (gridStatus.stats?.realized_pnl || 0) >= 0 
+                          ? 'text-green-400' 
+                          : 'text-red-400'
+                      }`}>
+                        {((gridStatus.stats?.realized_pnl || 0) / (gridStatus.total_amount || 1) * 100).toFixed(2)}%
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Right Panel - Orders */}
+          <div className="col-span-8">
+            {/* Orders Table */}
+            {openOrders.length > 0 ? (
+              <div className="bg-gray-800 rounded-xl p-4">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-lg font-bold">Open Orders</h2>
+                  <div className="text-sm text-gray-400">
+                    {openOrders.length} Active Orders
+                  </div>
+                </div>
+                
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="text-left text-gray-400 text-sm">
+                        <th className="pb-3 pl-3">Side</th>
+                        <th className="pb-3">Price</th>
+                        <th className="pb-3">Amount</th>
+                        <th className="pb-3">Filled</th>
+                        <th className="pb-3">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-700">
+                      {paginatedOrders.map((order) => (
+                        <tr key={order.orderId} className="text-sm">
+                          <td className="py-2 pl-3">
+                            <span className={`px-2 py-0.5 rounded text-xs ${
+                              order.side === 'BUY' 
+                                ? 'bg-green-500/20 text-green-300'
+                                : 'bg-red-500/20 text-red-300'
+                            }`}>
+                              {order.side}
+                            </span>
+                          </td>
+                          <td className="py-2">${parseFloat(order.price).toFixed(6)}</td>
+                          <td className="py-2">{parseFloat(order.origQty).toFixed(2)}</td>
+                          <td className="py-2">
+                            <div className="flex items-center gap-2">
+                              <div className="w-16 bg-gray-700 rounded-full h-1">
+                                <div 
+                                  className="bg-blue-500 h-1 rounded-full" 
+                                  style={{width: `${(parseFloat(order.executedQty) / parseFloat(order.origQty)) * 100}%`}}
+                                ></div>
+                              </div>
+                              <span>{parseFloat(order.executedQty).toFixed(2)}</span>
+                            </div>
+                          </td>
+                          <td className="py-2">
+                            <span className="px-2 py-0.5 bg-gray-700 rounded text-xs">
+                              {order.state}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                
+                {/* Pagination */}
+                {totalPages > 1 && (
+                  <div className="flex justify-center mt-4 space-x-1">
+                    {Array.from({ length: totalPages }, (_, i) => (
+                      <button
+                        key={i}
+                        onClick={() => setCurrentPage(i + 1)}
+                        className={`px-2 py-1 rounded text-xs ${
+                          currentPage === i + 1
+                            ? 'bg-blue-500 text-white'
+                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        }`}
+                      >
+                        {i + 1}
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
-            </div>
+            ) : (
+              <div className="bg-gray-800 rounded-xl p-8 text-center">
+                <div className="text-gray-400">No active orders</div>
+                <div className="text-sm text-gray-500 mt-1">
+                  Orders will appear here when the grid is running
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
